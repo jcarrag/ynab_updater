@@ -33,7 +33,11 @@ pub mod pushover {
     }
 
     impl SendMessage {
-        pub fn new(token: impl Into<String>, user: impl Into<String>, message: impl Into<String>) -> Self {
+        pub fn new(
+            token: impl Into<String>,
+            user: impl Into<String>,
+            message: impl Into<String>,
+        ) -> Self {
             Self {
                 token: token.into(),
                 user: user.into(),

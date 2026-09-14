@@ -6,7 +6,7 @@ use scraper::{Html, Selector};
 use serde::Deserialize;
 use std::env;
 use ynab_updater::{
-    update_ynab, GetBalance, GetYnabAccountConfig, YnabAccountConfig, CONFIG_FILENAME,
+    CONFIG_FILENAME, GetBalance, GetYnabAccountConfig, YnabAccountConfig, update_ynab,
 };
 
 #[derive(Clone, Debug, Deserialize)]
