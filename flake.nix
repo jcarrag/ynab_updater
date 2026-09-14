@@ -104,6 +104,27 @@
           secretName = "ynab-updater-settings";
           secretPath = "/run/ynab-updater-secrets/settings.toml";
           secretDir = dirOf secretPath;
+
+          # Runs as root (the `+` on ExecStartPre) since issuing a Tailscale
+          # cert needs either root or being the tailscaled "operator" - and
+          # ynab-updater isn't made the operator, so as not to take that role
+          # away from any human user who already has it. Safe to run on every
+          # start: if the existing cert is still valid for a while,
+          # `tailscale cert` just rewrites the same files.
+          renewSaxoTlsCert = pkgs.writeShellScript "ynab-updater-saxo-renew-cert" ''
+            set -euo pipefail
+
+            dns_name=$(${pkgs.tailscale}/bin/tailscale status --json \
+              | ${pkgs.jq}/bin/jq -r '.Self.DNSName | rtrimstr(".")')
+
+            ${pkgs.tailscale}/bin/tailscale cert \
+              --cert-file=${secretDir}/tailscale.crt \
+              --key-file=${secretDir}/tailscale.key \
+              "$dns_name"
+
+            chown ynab-updater:ynab-updater ${secretDir}/tailscale.crt ${secretDir}/tailscale.key
+            chmod 0400 ${secretDir}/tailscale.crt ${secretDir}/tailscale.key
+          '';
         in
         {
           imports = [
@@ -185,9 +206,13 @@
               };
               serviceConfig = {
                 Type = "oneshot";
+                ExecStartPre = "+${renewSaxoTlsCert}";
                 ExecStart = "${self.packages.${system}.saxo}/bin/saxo";
                 User = "ynab-updater";
                 Group = "ynab-updater";
+                # The cert/key (and access_token.json) are written into the
+                # otherwise-read-only secretDir.
+                ReadWritePaths = [ secretDir ];
                 NoNewPrivileges = true;
                 PrivateTmp = true;
                 ProtectSystem = "strict";

@@ -1,16 +1,18 @@
 #![feature(iterator_try_collect)]
 
-use anyhow::{bail, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Duration, Utc};
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::str::from_utf8;
+use std::sync::Arc;
 use std::{env, net::TcpListener};
 use ynab_updater::{
+    CONFIG_FILENAME, GetBalance, GetYnabAccountConfig, YnabAccountConfig,
     pushover::{self, SendMessage},
-    update_ynab, GetBalance, GetYnabAccountConfig, YnabAccountConfig, CONFIG_FILENAME,
+    update_ynab,
 };
 
 static SAXO_AUTH_URL: &str = "https://live.logonvalidation.net/authorize";
@@ -18,6 +20,8 @@ static SAXO_ACCESS_URL: &str = "https://live.logonvalidation.net/token";
 static SAXO_API_URL: &str = "https://gateway.saxobank.com/openapi/";
 
 static ACCESS_TOKEN_FILENAME: &str = "access_token.json";
+static TLS_CERT_FILENAME: &str = "tailscale.crt";
+static TLS_KEY_FILENAME: &str = "tailscale.key";
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -213,23 +217,56 @@ async fn get_login_uri(config: &Config, client: &reqwest::Client) -> Result<Stri
                 .await
                 .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
 
-            bail!("Unable to get Location header from Saxo auth response (status {status}): {body}");
+            bail!(
+                "Unable to get Location header from Saxo auth response (status {status}): {body}"
+            );
         }
     };
 
     Ok(location)
 }
 
-// Since the TCP listener is expecting HTTP it will fail to decode an HTTPS request.
-// Some browsers by default will attempt to upgrade the request from HTTP to HTTPS regardless so the OAuth callback fails.
-// - Brave (Desktop) was fixed by following [this thread's](https://community.brave.com/t/disable-forcing-https/525972/20) advice on how to disable this behaviour.
-// - Brave iOS seems unable to be configured to not do this, so on iOS Safari must be used instead.
+fn tls_cert_path(config: &Config) -> String {
+    format!("{}/{}", config.config_path, TLS_CERT_FILENAME)
+}
+
+fn tls_key_path(config: &Config) -> String {
+    format!("{}/{}", config.config_path, TLS_KEY_FILENAME)
+}
+
+fn load_tls_server_config(config: &Config) -> Result<rustls::ServerConfig> {
+    let cert_file =
+        std::fs::File::open(tls_cert_path(config)).context("Unable to open TLS cert file")?;
+    let certs = rustls_pemfile::certs(&mut std::io::BufReader::new(cert_file))
+        .try_collect::<Vec<_>>()
+        .context("Unable to parse TLS cert file")?;
+
+    let key_file =
+        std::fs::File::open(tls_key_path(config)).context("Unable to open TLS key file")?;
+    let key = rustls_pemfile::private_key(&mut std::io::BufReader::new(key_file))
+        .context("Unable to parse TLS key file")?
+        .context("No private key found in TLS key file")?;
+
+    let server_config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .context("Unable to build TLS server config")?;
+
+    Ok(server_config)
+}
+
 fn block_until_auth_code(config: &Config) -> Result<String> {
     info!("Waiting for auth code redirect");
 
+    let tls_config = Arc::new(load_tls_server_config(config)?);
+
     let listener = TcpListener::bind(format!("{}:9999", config.tailscale_ip))?;
 
-    let (mut stream, _) = listener.accept()?;
+    let (mut tcp_stream, _) = listener.accept()?;
+
+    let mut conn = rustls::ServerConnection::new(tls_config)?;
+    let mut stream = rustls::Stream::new(&mut conn, &mut tcp_stream);
+
     let mut buffer = [0; 512];
     stream.read_exact(&mut buffer).unwrap();
 
@@ -348,6 +385,10 @@ async fn get_account_value(
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
+
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Unable to install rustls default crypto provider");
 
     let _saxo = Saxo {};
 
