@@ -2,14 +2,15 @@
   description = "A YNAB updater";
 
   inputs.rustOverlay.url = "github:oxalica/rust-overlay";
+  inputs.agenix.url = "github:ryantm/agenix";
 
-  outputs = { self, unstable, rustOverlay }:
+  outputs = { self, unstable, rustOverlay, agenix }:
     let
       system = "x86_64-linux";
 
       pname = "ynab-updater";
 
-      pkgs = import unstable { inherit system; overlays = [ rustOverlay.overlay ]; };
+      pkgs = import unstable { inherit system; overlays = [ rustOverlay.overlays.default ]; };
 
       rust = pkgs.rust-bin.nightly.latest.default.override {
         extensions = [
@@ -62,15 +63,25 @@
           rustup
           pkg-config
           openssl
+          agenix.packages.${system}.default
         ];
       };
 
-      nixosModules.ynab-updater = { config, pkgs, ... }:
+      nixosModules.ynab-updater = { config, ... }:
         with lib; with lib.types;
         let
           cfg = config.programs.ynab-updater;
+          secretName = "ynab-updater-settings";
+          # agenix decrypts this secret to its own directory, named so that
+          # YNAB_CONFIG_PATH (a directory) can point straight at its parent.
+          secretPath = "/run/agenix/${secretName}/${pname}/settings.toml";
+          secretDir = dirOf secretPath;
         in
         {
+          imports = [
+            agenix.nixosModules.default
+          ];
+
           options.programs.ynab-updater = {
             enable = mkEnableOption "Enable the YNAB updater service.";
             configDir = mkOption {
@@ -80,7 +91,21 @@
           };
 
           config = mkIf cfg.enable {
-            systemd.user.timers."ynab-updater-hl" = {
+            users.users.ynab-updater = {
+              isSystemUser = true;
+              group = "ynab-updater";
+            };
+            users.groups.ynab-updater = { };
+
+            age.secrets.${secretName} = {
+              file = ./secrets/settings.toml.age;
+              path = secretPath;
+              mode = "0400";
+              owner = "ynab-updater";
+              group = "ynab-updater";
+            };
+
+            systemd.timers."ynab-updater-hl" = {
               wantedBy = [ "timers.target" ];
               timerConfig = {
                 OnBootSec = "10s";
@@ -88,18 +113,35 @@
                 Unit = "ynab-updater-hl.service";
               };
             };
-            systemd.user.services."ynab-updater-hl" = {
+            systemd.services."ynab-updater-hl" = {
               environment = {
                 RUST_LOG = "info";
-                YNAB_CONFIG_PATH = cfg.configDir;
+                YNAB_CONFIG_PATH = secretDir;
               };
               serviceConfig = {
                 Type = "oneshot";
                 ExecStart = "${self.packages.${system}.hl}/bin/hl";
+                User = "ynab-updater";
+                Group = "ynab-updater";
+                # Hardening: even a compromised process running as this
+                # user gets a locked-down environment, and no other user
+                # (besides root) can read the secret regardless.
+                NoNewPrivileges = true;
+                PrivateTmp = true;
+                ProtectSystem = "strict";
+                ProtectHome = true;
+                ProtectKernelTunables = true;
+                ProtectKernelModules = true;
+                ProtectControlGroups = true;
+                RestrictSUIDSGID = true;
+                RestrictNamespaces = true;
+                LockPersonality = true;
+                MemoryDenyWriteExecute = true;
+                ReadOnlyPaths = [ secretDir ];
               };
             };
 
-            systemd.user.timers."ynab-updater-saxo" = {
+            systemd.timers."ynab-updater-saxo" = {
               wantedBy = [ "timers.target" ];
               timerConfig = {
                 OnBootSec = "10s";
@@ -109,14 +151,28 @@
                 Unit = "ynab-updater-saxo.service";
               };
             };
-            systemd.user.services."ynab-updater-saxo" = {
+            systemd.services."ynab-updater-saxo" = {
               environment = {
                 RUST_LOG = "info";
-                YNAB_CONFIG_PATH = cfg.configDir;
+                YNAB_CONFIG_PATH = secretDir;
               };
               serviceConfig = {
                 Type = "oneshot";
                 ExecStart = "${self.packages.${system}.saxo}/bin/saxo";
+                User = "ynab-updater";
+                Group = "ynab-updater";
+                NoNewPrivileges = true;
+                PrivateTmp = true;
+                ProtectSystem = "strict";
+                ProtectHome = true;
+                ProtectKernelTunables = true;
+                ProtectKernelModules = true;
+                ProtectControlGroups = true;
+                RestrictSUIDSGID = true;
+                RestrictNamespaces = true;
+                LockPersonality = true;
+                MemoryDenyWriteExecute = true;
+                ReadOnlyPaths = [ secretDir ];
               };
             };
           };
