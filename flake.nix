@@ -62,6 +62,7 @@
           RUST_BACKTRACE=1 \
           YNAB_TAILSCALE_IP=$(${pkgs.tailscale}/bin/tailscale ip --4) \
           YNAB_CONFIG_PATH=''${YNAB_CONFIG_PATH:-/home/james/dev/my/ynab_updater} \
+          YNAB_STATE_PATH=''${YNAB_STATE_PATH:-''${YNAB_CONFIG_PATH:-/home/james/dev/my/ynab_updater}} \
           ${ynab-updater}/bin/saxo
         '';
       };
@@ -105,6 +106,8 @@
           secretPath = "/run/ynab-updater-secrets/settings.toml";
           secretDir = dirOf secretPath;
 
+          saxoStateDir = "/var/lib/ynab-updater-saxo";
+
           # Runs as root (the `+` on ExecStartPre) since issuing a Tailscale
           # cert needs either root or being the tailscaled "operator" - and
           # ynab-updater isn't made the operator, so as not to take that role
@@ -118,12 +121,12 @@
               | ${pkgs.jq}/bin/jq -r '.Self.DNSName | rtrimstr(".")')
 
             ${pkgs.tailscale}/bin/tailscale cert \
-              --cert-file=${secretDir}/tailscale.crt \
-              --key-file=${secretDir}/tailscale.key \
+              --cert-file=${saxoStateDir}/tailscale.crt \
+              --key-file=${saxoStateDir}/tailscale.key \
               "$dns_name"
 
-            chown ynab-updater:ynab-updater ${secretDir}/tailscale.crt ${secretDir}/tailscale.key
-            chmod 0400 ${secretDir}/tailscale.crt ${secretDir}/tailscale.key
+            chown ynab-updater:ynab-updater ${saxoStateDir}/tailscale.crt ${saxoStateDir}/tailscale.key
+            chmod 0400 ${saxoStateDir}/tailscale.crt ${saxoStateDir}/tailscale.key
           '';
         in
         {
@@ -203,6 +206,7 @@
               environment = {
                 RUST_LOG = "info";
                 YNAB_CONFIG_PATH = secretDir;
+                YNAB_STATE_PATH = saxoStateDir;
               };
               serviceConfig = {
                 Type = "oneshot";
@@ -210,9 +214,11 @@
                 ExecStart = "${self.packages.${system}.saxo}/bin/saxo";
                 User = "ynab-updater";
                 Group = "ynab-updater";
-                # The cert/key (and access_token.json) are written into the
-                # otherwise-read-only secretDir.
-                ReadWritePaths = [ secretDir ];
+                # Real read-write directory for this service's own runtime
+                # state (access_token.json, the Tailscale TLS cert/key) -
+                # systemd creates it pre-owned by User/Group and exempts it
+                # from ProtectSystem=strict automatically.
+                StateDirectory = "ynab-updater-saxo";
                 NoNewPrivileges = true;
                 PrivateTmp = true;
                 ProtectSystem = "strict";

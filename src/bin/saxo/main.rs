@@ -26,8 +26,12 @@ static TLS_KEY_FILENAME: &str = "tailscale.key";
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub struct Config {
-    #[serde(rename = "config_path")]
-    pub config_path: String,
+    // Where this binary caches its own runtime state (access_token.json, the
+    // Tailscale TLS cert/key) - deliberately distinct from YNAB_CONFIG_PATH
+    // (which locates settings.toml itself), since on the deployed service
+    // that's a read-only agenix-managed directory.
+    #[serde(rename = "state_path")]
+    pub state_path: String,
     #[serde(rename = "tailscale_ip")]
     pub tailscale_ip: String,
 
@@ -119,7 +123,7 @@ async fn get_refreshed_access_token(
 }
 
 fn get_access_token_path(config: &Config) -> String {
-    format!("{}/{}", config.config_path, ACCESS_TOKEN_FILENAME)
+    format!("{}/{}", config.state_path, ACCESS_TOKEN_FILENAME)
 }
 
 async fn get_cached_or_live_access_token(
@@ -227,11 +231,11 @@ async fn get_login_uri(config: &Config, client: &reqwest::Client) -> Result<Stri
 }
 
 fn tls_cert_path(config: &Config) -> String {
-    format!("{}/{}", config.config_path, TLS_CERT_FILENAME)
+    format!("{}/{}", config.state_path, TLS_CERT_FILENAME)
 }
 
 fn tls_key_path(config: &Config) -> String {
-    format!("{}/{}", config.config_path, TLS_KEY_FILENAME)
+    format!("{}/{}", config.state_path, TLS_KEY_FILENAME)
 }
 
 fn load_tls_server_config(config: &Config) -> Result<rustls::ServerConfig> {
