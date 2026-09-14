@@ -1,6 +1,6 @@
 #![feature(iterator_try_collect)]
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use chrono::{DateTime, Duration, Utc};
 use log::info;
 use serde::{Deserialize, Serialize};
@@ -190,7 +190,7 @@ fn get_saxo_ynab_account_config() -> Result<YnabAccountConfig> {
 }
 
 async fn get_login_uri(config: &Config, client: &reqwest::Client) -> Result<String> {
-    let location = client
+    let response = client
         .get(SAXO_AUTH_URL)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .query(&[
@@ -200,12 +200,22 @@ async fn get_login_uri(config: &Config, client: &reqwest::Client) -> Result<Stri
             ("redirect_uri", config.saxo_redirect_uri.as_str()),
         ])
         .send()
-        .await?
-        .headers()
-        .get("location")
-        .expect("Unable to get Location header")
-        .to_str()?
-        .to_owned();
+        .await?;
+
+    let status = response.status();
+
+    // expires on 5/11/2031 - renew at https://www.developer.saxo/openapi/appmanagement#/livedetails/$CLIENT_ID
+    let location = match response.headers().get("location") {
+        Some(location) => location.to_str()?.to_owned(),
+        None => {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
+
+            bail!("Unable to get Location header from Saxo auth response (status {status}): {body}");
+        }
+    };
 
     Ok(location)
 }
