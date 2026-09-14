@@ -56,7 +56,24 @@
         '';
       };
 
-      devShell.${system} = mkShell {
+      devShell.${system} =
+      let
+        decrypt-local-config = writeShellScriptBin "decrypt-local-config" ''
+          set -euo pipefail
+
+          config_path=''${YNAB_CONFIG_PATH:-/home/james/dev/my/ynab_updater}
+
+          (
+            cd ${self}/secrets
+            ${agenix.packages.${system}.default}/bin/agenix \
+              -d settings.toml.age \
+              -i ''${YNAB_AGE_IDENTITY:-$HOME/.ssh/id_ed25519}
+          ) > "$config_path/settings.toml"
+
+          echo "Decrypted settings.toml to $config_path/settings.toml"
+        '';
+      in
+      mkShell {
         buildInputs = [
           rust-analyzer
           rust
@@ -64,6 +81,7 @@
           pkg-config
           openssl
           agenix.packages.${system}.default
+          decrypt-local-config
         ];
       };
 
