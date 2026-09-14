@@ -4,13 +4,22 @@
   inputs.rustOverlay.url = "github:oxalica/rust-overlay";
   inputs.agenix.url = "github:ryantm/agenix";
 
-  outputs = { self, nixpkgs, rustOverlay, agenix }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      rustOverlay,
+      agenix,
+    }:
     let
       system = "x86_64-linux";
 
       pname = "ynab-updater";
 
-      pkgs = import nixpkgs { inherit system; overlays = [ rustOverlay.overlays.default ]; };
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [ rustOverlay.overlays.default ];
+      };
 
       rust = pkgs.rust-bin.nightly.latest.default.override {
         extensions = [
@@ -39,7 +48,8 @@
         buildInputs = [ pkgs.openssl ];
       };
     in
-    with pkgs; {
+    with pkgs;
+    {
       packages.${system} = {
         hl = writeShellScriptBin "hl" ''
           RUST_LOG=info \
@@ -57,36 +67,38 @@
       };
 
       devShell.${system} =
-      let
-        decrypt-local-config = writeShellScriptBin "decrypt-local-config" ''
-          set -euo pipefail
+        let
+          decrypt-local-config = writeShellScriptBin "decrypt-local-config" ''
+            set -euo pipefail
 
-          config_path=''${YNAB_CONFIG_PATH:-/home/james/dev/my/ynab_updater}
+            config_path=''${YNAB_CONFIG_PATH:-/home/james/dev/my/ynab_updater}
 
-          (
-            cd ${self}/secrets
-            ${agenix.packages.${system}.default}/bin/agenix \
-              -d settings.toml.age \
-              -i ''${YNAB_AGE_IDENTITY:-$HOME/.ssh/id_ed25519}
-          ) > "$config_path/settings.toml"
+            (
+              cd ${self}/secrets
+              ${agenix.packages.${system}.default}/bin/agenix \
+                -d settings.toml.age \
+                -i ''${YNAB_AGE_IDENTITY:-$HOME/.ssh/id_ed25519}
+            ) > "$config_path/settings.toml"
 
-          echo "Decrypted settings.toml to $config_path/settings.toml"
-        '';
-      in
-      mkShell {
-        buildInputs = [
-          rust-analyzer
-          rust
-          rustup
-          pkg-config
-          openssl
-          agenix.packages.${system}.default
-          decrypt-local-config
-        ];
-      };
+            echo "Decrypted settings.toml to $config_path/settings.toml"
+          '';
+        in
+        mkShell {
+          buildInputs = [
+            rust-analyzer
+            rust
+            rustup
+            pkg-config
+            openssl
+            agenix.packages.${system}.default
+            decrypt-local-config
+          ];
+        };
 
-      nixosModules.ynab-updater = { config, ... }:
-        with lib; with lib.types;
+      nixosModules.ynab-updater =
+        { config, ... }:
+        with lib;
+        with lib.types;
         let
           cfg = config.programs.ynab-updater;
           secretName = "ynab-updater-settings";
