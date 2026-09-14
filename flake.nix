@@ -72,9 +72,7 @@
         let
           cfg = config.programs.ynab-updater;
           secretName = "ynab-updater-settings";
-          # agenix decrypts this secret to its own directory, named so that
-          # YNAB_CONFIG_PATH (a directory) can point straight at its parent.
-          secretPath = "/run/agenix/${secretName}/${pname}/settings.toml";
+          secretPath = "/run/ynab-updater-secrets/settings.toml";
           secretDir = dirOf secretPath;
         in
         {
@@ -137,7 +135,6 @@
                 RestrictNamespaces = true;
                 LockPersonality = true;
                 MemoryDenyWriteExecute = true;
-                ReadOnlyPaths = [ secretDir ];
               };
             };
 
@@ -172,7 +169,6 @@
                 RestrictNamespaces = true;
                 LockPersonality = true;
                 MemoryDenyWriteExecute = true;
-                ReadOnlyPaths = [ secretDir ];
               };
             };
           };
