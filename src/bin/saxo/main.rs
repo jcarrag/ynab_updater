@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Duration, Utc};
-use log::info;
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -274,33 +274,26 @@ fn block_until_auth_code(config: &Config) -> Result<String> {
     let mut buffer = [0; 512];
     stream.read_exact(&mut buffer).unwrap();
 
-    info!(
-        "buffer size: {:?}, str: {:?}, content: {:?}",
-        buffer.len(),
-        from_utf8(&buffer),
-        buffer.clone().to_ascii_uppercase()
-    );
+    debug!("raw callback request: {:?}", from_utf8(&buffer));
 
     stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\nsuccess".as_bytes())?;
     stream.flush()?;
 
     let mut headers = [httparse::EMPTY_HEADER; 20];
     let mut req = httparse::Request::new(&mut headers);
-    info!("pres req content: {:?}", req);
     req.parse(&buffer)?;
-    info!("parsed req content: {:?}", req);
+    debug!("parsed callback request: {:?}", req);
 
-    let req = reqwest::Url::parse(format!("http://_{}", req.path.unwrap()).as_str())?;
-    info!("2 parsed req content: {:?}", req);
+    let url = reqwest::Url::parse(format!("http://_{}", req.path.unwrap()).as_str())?;
 
-    let code = req
+    let code = url
         .query_pairs()
         .find(|s| s.0 == "code")
         .expect("Unable to parse code from redirect_uri")
         .1
         .into_owned();
 
-    info!("2 req code: {:?}", code);
+    info!("Received auth code redirect");
 
     Ok(code)
 }
