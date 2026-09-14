@@ -1,13 +1,99 @@
 use anyhow::Result;
 use chrono::prelude::*;
 use log::info;
-use pushover::requests::message::SendMessage;
 use reqwest::header;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::env;
 
 pub static CONFIG_FILENAME: &str = "settings.toml";
+
+/// A minimal Pushover client, replacing the unmaintained `pushover` crate
+/// (last released 0.4.0 in 2020, and the source of a dependency chain that
+/// no longer compiles on current Rust). Pushover's API is a single POST
+/// endpoint, so this just talks to it directly with `reqwest`.
+///
+/// See https://pushover.net/api
+pub mod pushover {
+    use anyhow::Result;
+
+    static MESSAGES_URL: &str = "https://api.pushover.net/1/messages.json";
+
+    pub struct API {
+        client: reqwest::Client,
+    }
+
+    #[derive(Default)]
+    pub struct SendMessage {
+        token: String,
+        user: String,
+        message: String,
+        url: Option<String>,
+        url_title: Option<String>,
+    }
+
+    impl SendMessage {
+        pub fn new(token: impl Into<String>, user: impl Into<String>, message: impl Into<String>) -> Self {
+            Self {
+                token: token.into(),
+                user: user.into(),
+                message: message.into(),
+                ..Default::default()
+            }
+        }
+
+        pub fn set_url(&mut self, url: impl Into<String>) -> &mut Self {
+            self.url = Some(url.into());
+            self
+        }
+
+        pub fn set_url_title(&mut self, url_title: impl Into<String>) -> &mut Self {
+            self.url_title = Some(url_title.into());
+            self
+        }
+
+        fn as_form(&self) -> Vec<(&str, &str)> {
+            let mut form = vec![
+                ("token", self.token.as_str()),
+                ("user", self.user.as_str()),
+                ("message", self.message.as_str()),
+            ];
+            if let Some(url) = &self.url {
+                form.push(("url", url.as_str()));
+            }
+            if let Some(url_title) = &self.url_title {
+                form.push(("url_title", url_title.as_str()));
+            }
+            form
+        }
+    }
+
+    impl API {
+        pub fn new() -> Self {
+            Self {
+                client: reqwest::Client::new(),
+            }
+        }
+
+        pub async fn send(&self, msg: &SendMessage) -> Result<()> {
+            self.client
+                .post(MESSAGES_URL)
+                .form(&msg.as_form())
+                .send()
+                .await?
+                .error_for_status()?;
+            Ok(())
+        }
+    }
+
+    impl Default for API {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+}
+
+use pushover::SendMessage;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -224,7 +310,7 @@ where
                 config.pushover_user_key,
                 format!("Failed to update YNAB: {:#?}", e.to_string()),
             );
-            api.send(&msg).unwrap();
+            api.send(&msg).await.unwrap();
             Err(e)
         }
     }

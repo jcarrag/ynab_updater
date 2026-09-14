@@ -4,13 +4,13 @@
   inputs.rustOverlay.url = "github:oxalica/rust-overlay";
   inputs.agenix.url = "github:ryantm/agenix";
 
-  outputs = { self, unstable, rustOverlay, agenix }:
+  outputs = { self, nixpkgs, rustOverlay, agenix }:
     let
       system = "x86_64-linux";
 
       pname = "ynab-updater";
 
-      pkgs = import unstable { inherit system; overlays = [ rustOverlay.overlays.default ]; };
+      pkgs = import nixpkgs { inherit system; overlays = [ rustOverlay.overlays.default ]; };
 
       rust = pkgs.rust-bin.nightly.latest.default.override {
         extensions = [

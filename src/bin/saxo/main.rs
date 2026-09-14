@@ -3,13 +3,13 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use log::info;
-use pushover::requests::message::SendMessage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::str::from_utf8;
 use std::{env, net::TcpListener};
 use ynab_updater::{
+    pushover::{self, SendMessage},
     update_ynab, GetBalance, GetYnabAccountConfig, YnabAccountConfig, CONFIG_FILENAME,
 };
 
@@ -160,7 +160,7 @@ async fn get_cached_or_live_access_token(
         _ => {
             let login_uri = get_login_uri(config, client).await?;
 
-            send_login_uri_push_notification(config, api, login_uri)?;
+            send_login_uri_push_notification(config, api, login_uri).await?;
 
             let auth_code = block_until_auth_code(config)?;
 
@@ -254,7 +254,7 @@ fn block_until_auth_code(config: &Config) -> Result<String> {
     Ok(code)
 }
 
-fn send_login_uri_push_notification(
+async fn send_login_uri_push_notification(
     config: &Config,
     api: &pushover::API,
     login_uri: String,
@@ -267,7 +267,7 @@ fn send_login_uri_push_notification(
     msg.set_url(login_uri.clone());
     msg.set_url_title("Login link");
 
-    api.send(&msg).unwrap();
+    api.send(&msg).await.unwrap();
 
     Ok(())
 }
